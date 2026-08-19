@@ -70,7 +70,8 @@ DPI_MODE = enable_dpi_awareness()
 import pynput
 from win32gui import FindWindow, GetClientRect, ClientToScreen
 
-from hacks import casinofingerprint, casinokeypad, cayofingerprint, cayovoltage
+from hacks import (bruteforce, casinofingerprint, casinokeypad, cayofingerprint,
+                   cayovoltage, hostnumber)
 from hacks._util import (FocusLost, config_summary, save_debug,
                          set_target_window, timing_summary)
 
@@ -216,7 +217,9 @@ def main():
     print('[*] Press F6 for Keypad Cracker')
     print('[*] Press F7 for Retro Fingerprint Scanner')
     print('[*] Press F8 for Voltage Hack')
-    print('[*] Press F9 to dump what the tool sees (debug/)')
+    print('[*] Press F9 for Host Number Matcher')
+    print('[*] Press F10 for BruteForce Matcher')
+    print('[*] Press F11 to dump what the tool sees (debug/)')
     print('')
     print('[!] 전체화면(Fullscreen) 대신 테두리 없는 창 모드를 쓰세요.')
     print('[!] 화면 캡처가 검게 나오면 이 프로그램을 관리자 권한으로 실행하세요.')
@@ -228,7 +231,9 @@ def main():
             '<F6>': launch(casinokeypad),
             '<F7>': launch(cayofingerprint),
             '<F8>': launch(cayovoltage),
-            '<F9>': debug_dump}) as h:
+            '<F9>': launch(hostnumber),
+            '<F10>': launch(bruteforce),
+            '<F11>': debug_dump}) as h:
         h.join()
 
 

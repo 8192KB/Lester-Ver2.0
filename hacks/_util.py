@@ -202,6 +202,18 @@ def tap(key, extra=0.0):
     time.sleep(KEY_GAP + extra)
 
 
+def press_instant(key):
+    """반응 속도가 중요한 곳용 키 입력
+
+    설정된 간격이나 SLOW 배율을 적용하지 않는다
+    움직이는 표적에 맞춰 누르는 곳에서 지연을 넣으면 그대로 빗나감
+    """
+    check_focus()
+    keyboard.press(key)
+    time.sleep(0.02)
+    keyboard.release(key)
+
+
 def save_debug(bbox, out_dir='debug'):
     """현재 캡처와 각 모듈이 보는 영역을 파일로 저장
 
