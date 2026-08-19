@@ -1,0 +1,19 @@
+# https://github.com/github/gitignore/blob/main/Python.gitignore
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+
+# Distribution / packaging
+build/
+dist/
+
+# Pyinstaller
+*.manifest
+*.spec
+!main.spec
+
+# Environments
+.venv
+
+# F9 debug dumps
+debug/

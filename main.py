@@ -1,97 +1,236 @@
+import os
 import sys
 import time
-import pynput
+import threading
 from threading import Thread
-from win32gui import FindWindow, GetWindowRect
-from hacks import casinofingerprint, casinokeypad, cayofingerprint, cayovoltage
 
-try:
-    from ctypes import windll
-    windll.user32.SetProcessDPIAware()
-except:
-    pass
+
+def fix_console_encoding():
+    """콘솔 UTF-8 설정
+
+    한글 Windows 기본 코드페이지가 cp949라 배너의 블록 문자(U+2588)를
+    인코딩 못 하고 UnicodeEncodeError로 죽음. 파일로 리다이렉트해도 마찬가지
+    """
+    try:
+        from ctypes import windll
+        windll.kernel32.SetConsoleOutputCP(65001)
+    except Exception:
+        pass
+
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding='utf-8', errors='replace')
+        except Exception:
+            pass
+
+
+fix_console_encoding()
+
+
+def enable_dpi_awareness():
+    """창 좌표를 물리 픽셀로 받으려면 DPI 인식이 켜져 있어야 함
+
+    실패하면 배율(125% 등)만큼 좌표가 축소돼 캡처가 통째로 어긋남
+    예외 대신 실패 코드를 반환하므로 반환값을 꼭 볼 것
+    """
+    from ctypes import windll, c_void_p, c_int
+
+    try:
+        fn = getattr(windll.user32, 'SetProcessDpiAwarenessContext', None)
+        if fn is not None:
+            # DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = (HANDLE)-4
+            # HANDLE이 64비트라 argtypes 없이 넘기면 -4가 32비트로 잘려
+            # 조용히 실패함
+            fn.argtypes = [c_void_p]
+            fn.restype = c_int
+            if fn(c_void_p(-4)):
+                return 'per-monitor v2'
+    except Exception:
+        pass
+
+    try:
+        # PROCESS_PER_MONITOR_DPI_AWARE = 2, 성공하면 S_OK(0)
+        if windll.shcore.SetProcessDpiAwareness(2) == 0:
+            return 'per-monitor'
+    except Exception:
+        pass
+
+    try:
+        if windll.user32.SetProcessDPIAware():
+            return 'system'
+    except Exception:
+        pass
+
+    return None
+
+
+# 다른 모듈이 창/DC 만들기 전에 제일 먼저
+DPI_MODE = enable_dpi_awareness()
+
+import pynput
+from win32gui import FindWindow, GetClientRect, ClientToScreen
+
+from hacks import casinofingerprint, casinokeypad, cayofingerprint, cayovoltage
+from hacks._util import (FocusLost, config_summary, save_debug,
+                         set_target_window, timing_summary)
+
+WINDOW_TITLE = "Grand Theft Auto V"
+TARGET_AR = 16 / 9
+
+_busy = threading.Lock()
+
 
 def print_banner():
     print('''
-██╗░░░░░███████╗░██████╗████████╗███████╗██████╗░  ██╗░░░██╗███████╗██████╗░  ██████╗░░░░░█████╗░
-██║░░░░░██╔════╝██╔════╝╚══██╔══╝██╔════╝██╔══██╗  ██║░░░██║██╔════╝██╔══██╗  ╚════██╗░░░██╔══██╗
-██║░░░░░█████╗░░╚█████╗░░░░██║░░░█████╗░░██████╔╝  ╚██╗░██╔╝█████╗░░██████╔╝  ░░███╔═╝░░░██║░░██║
-██║░░░░░██╔══╝░░░╚═══██╗░░░██║░░░██╔══╝░░██╔══██╗  ░╚████╔╝░██╔══╝░░██╔══██╗  ██╔══╝░░░░░██║░░██║
-███████╗███████╗██████╔╝░░░██║░░░███████╗██║░░██║  ░░╚██╔╝░░███████╗██║░░██║  ███████╗██╗╚█████╔╝
-╚══════╝╚══════╝╚═════╝░░░░╚═╝░░░╚══════╝╚═╝░░╚═╝  ░░░╚═╝░░░╚══════╝╚═╝░░╚═╝  ╚══════╝╚═╝░╚════╝░
+██╗░░░░░███████╗░██████╗████████╗███████╗██████╗░  ██╗░░░██╗███████╗██████╗░  ██████╗░░░░░█████╗░
+██║░░░░░██╔════╝██╔════╝╚══██╔══╝██╔════╝██╔══██╗  ██║░░░██║██╔════╝██╔══██╗  ╚════██╗░░░██╔══██╗
+██║░░░░░█████╗░░╚█████╗░░░░██║░░░█████╗░░██████╔╝  ╚██╗░██╔╝█████╗░░██████╔╝  ░░███╔═╝░░░██║░░██║
+██║░░░░░██╔══╝░░░╚═══██╗░░░██║░░░██╔══╝░░██╔══██╗  ░╚████╔╝░██╔══╝░░██╔══██╗  ██╔══╝░░░░░██║░░██║
+███████╗███████╗██████╔╝░░░██║░░░███████╗██║░░██║  ░░╚██╔╝░░███████╗██║░░██║  ███████╗██╗╚█████╔╝
+╚══════╝╚══════╝╚═════╝░░░░╚═╝░░░╚══════╝╚═╝░░╚═╝  ░░░╚═╝░░░╚══════╝╚═╝░░╚═╝  ╚══════╝╚═╝░╚════╝░
                                                                                           ''')
+
 
 def print_credits():
     print('''
 Made by JUSTDIE
 Special thanks to RedHeadEmile
     ''')
-    
-def check_window():
-    print('[*] Searching Grand Theft Auto V...')
 
-    while True:
-        hwnd = FindWindow(None, "Grand Theft Auto V")
-        
-        if hwnd:
-            print('[*] Grand Theft Auto V Detected!')
-            print('')
-            print('[*] Press F4 for Exit')
-            print('[*] Press F5 for Fingerprint Scanner')
-            print('[*] Press F6 for Keypad Cracker')
-            print('[*] Press F7 for Retro Fingerprint Scanner')
-            print('[*] Press F8 for Voltage Hack')
-            print('')
-            print('=============================================')
-            return GetWindowRect(hwnd)
-        
-        time.sleep(1)
 
-def casino_fingerprint(bbox):
-    thread = Thread(target=casinofingerprint.main, args=(bbox,))
-    thread.start()
+def client_bbox(hwnd):
+    """테두리/그림자 뺀 실제 렌더 영역"""
+    left, top, right, bottom = GetClientRect(hwnd)
+    x0, y0 = ClientToScreen(hwnd, (left, top))
+    x1, y1 = ClientToScreen(hwnd, (right, bottom))
+    return (x0, y0, x1, y1)
 
-def casino_keypad(bbox):
-    thread = Thread(target=casinokeypad.main, args=(bbox,))
-    thread.start()
 
-def cayo_fingerprint(bbox):
-    thread = Thread(target=cayofingerprint.main, args=(bbox,))
-    thread.start()
+def content_bbox(rect):
+    """레터박스/필러박스 잘라내고 16:9 화면만 남김
 
-def cayo_voltage(bbox):
-    thread = Thread(target=cayovoltage.main, args=(bbox,))
-    thread.start()
+    21:9에선 미니게임 UI가 화면 중앙 16:9에만 그려짐
+    검은 띠를 포함한 채로 계산하면 좌표가 전부 어긋남
+    """
+    x0, y0, x1, y1 = rect
+    w, h = x1 - x0, y1 - y0
+    if w <= 0 or h <= 0:
+        return rect
+
+    ar = w / h
+    if ar > TARGET_AR + 1e-3:        # 21:9 등, 좌우가 남음
+        cw = round(h * TARGET_AR)
+        pad = (w - cw) // 2
+        return (x0 + pad, y0, x0 + pad + cw, y1)
+    if ar < TARGET_AR - 1e-3:        # 16:10, 4:3 등, 위아래가 남음
+        ch = round(w / TARGET_AR)
+        pad = (h - ch) // 2
+        return (x0, y0 + pad, x1, y0 + pad + ch)
+    return rect
+
+
+def resolve_bbox():
+    """핫키 누른 시점의 게임 화면 영역. 못 찾으면 None"""
+    hwnd = FindWindow(None, WINDOW_TITLE)
+    if not hwnd:
+        return None
+    return content_bbox(client_bbox(hwnd))
+
+
+def launch(module):
+    """핫키 핸들러 생성. bbox는 누를 때마다 새로 계산"""
+    def handler():
+        if _busy.locked():
+            print('[!] 이미 실행 중입니다.')
+            return
+
+        hwnd = FindWindow(None, WINDOW_TITLE)
+        if not hwnd:
+            print(f'[!] "{WINDOW_TITLE}" 창을 찾을 수 없습니다.')
+            return
+
+        bbox = content_bbox(client_bbox(hwnd))
+        set_target_window(hwnd)
+
+        def run():
+            with _busy:
+                try:
+                    module.main(bbox)
+                except FocusLost as e:
+                    print(f'[!] {e}')
+                    print('=============================================')
+                except Exception as e:
+                    print(f'[!] {type(e).__name__}: {e}')
+                    print('=============================================')
+
+        Thread(target=run, daemon=True).start()
+
+    return handler
+
+
+def debug_dump():
+    """지금 보고 있는 화면을 파일로 저장"""
+    bbox = resolve_bbox()
+    if bbox is None:
+        print(f'[!] "{WINDOW_TITLE}" 창을 찾을 수 없습니다.')
+        return
+    for path in save_debug(bbox):
+        print(f'[*] 저장: {path}')
+    print('=============================================')
+
 
 def shutdown():
-    sys.exit()
+    print('[*] 종료합니다.')
+    # pynput 콜백은 별도 스레드라 sys.exit()으론 프로세스가 안 죽음
+    os._exit(0)
+
+
+def wait_for_window():
+    print(f'[*] Searching {WINDOW_TITLE}...')
+    while True:
+        bbox = resolve_bbox()
+        if bbox:
+            print(f'[*] {WINDOW_TITLE} Detected!')
+            return bbox
+        time.sleep(1)
+
 
 def main():
     print_banner()
     print_credits()
 
-    # DPI 설정이 적용되지 않은 전체 창 bbox를 가져옵니다.
-    full_bbox = check_window()
-    if full_bbox:
-        # 21:9 모니터의 전체 화면 크기를 기반으로 16:9 게임 화면의 bbox를 계산합니다.
-        width = full_bbox[2] - full_bbox[0]
-        height = full_bbox[3] - full_bbox[1]
-        
-        game_width = int(height * (16 / 9))
-        black_bar_width = (width - game_width) // 2
-        
-        game_bbox = (full_bbox[0] + black_bar_width, full_bbox[1], full_bbox[2] - black_bar_width, full_bbox[3])
-        
-        print(f"[*] Full window bbox: {full_bbox}")
-        print(f"[*] Calculated 16:9 game bbox: {game_bbox}")
+    print(f'[*] DPI awareness: {DPI_MODE or "실패"}')
+    print(f'[*] Timing: {timing_summary()}')
+    print(f'[*] Config: {config_summary()}')
+    if DPI_MODE is None:
+        print('[!] DPI 인식 실패 - 배율이 100%가 아니면 좌표가 어긋납니다.')
 
-        with pynput.keyboard.GlobalHotKeys({
-                '<F4>': shutdown,
-                '<F5>': lambda: casino_fingerprint(game_bbox),
-                '<F6>': lambda: casino_keypad(game_bbox),
-                '<F7>': lambda: cayo_fingerprint(game_bbox),
-                '<F8>': lambda: cayo_voltage(game_bbox)}) as h:
-            h.join()
+    bbox = wait_for_window()
+    w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    print(f'[*] Game bbox: {bbox}  ({w}x{h})')
+    if h % 8 or w % 8:
+        print('[!] 크기가 어중간합니다. 모니터 배율이 100%인지 확인하세요.')
+    print('')
+    print('[*] Press F4 for Exit')
+    print('[*] Press F5 for Fingerprint Scanner')
+    print('[*] Press F6 for Keypad Cracker')
+    print('[*] Press F7 for Retro Fingerprint Scanner')
+    print('[*] Press F8 for Voltage Hack')
+    print('[*] Press F9 to dump what the tool sees (debug/)')
+    print('')
+    print('[!] 전체화면(Fullscreen) 대신 테두리 없는 창 모드를 쓰세요.')
+    print('[!] 화면 캡처가 검게 나오면 이 프로그램을 관리자 권한으로 실행하세요.')
+    print('=============================================')
+
+    with pynput.keyboard.GlobalHotKeys({
+            '<F4>': shutdown,
+            '<F5>': launch(casinofingerprint),
+            '<F6>': launch(casinokeypad),
+            '<F7>': launch(cayofingerprint),
+            '<F8>': launch(cayovoltage),
+            '<F9>': debug_dump}) as h:
+        h.join()
+
 
 if __name__ == "__main__":
     main()

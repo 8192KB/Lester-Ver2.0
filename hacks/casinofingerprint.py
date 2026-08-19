@@ -1,9 +1,8 @@
 import cv2
-import time
-import keyboard
 import numpy as np
-from PIL import Image, ImageGrab
 from collections import deque, namedtuple
+
+from ._util import DEBUG, dump, grab, retry, tap
 
 tofind = (950, 155, 1335, 685)
 
@@ -16,15 +15,47 @@ parts = [[(482, 279, 482 + 102, 279 + 102), (0, 0)],
 [(482, 711, 482 + 102, 711 + 102), (0, 3)],
 [(627, 711, 627 + 102, 711 + 102), (1, 3)]]
 
-def is_in(img, subimg):
-    """return if 'subimg' is in 'img'"""
+# 정답 조각은 항상 4개
+EXPECTED_MATCHES = 4
+# 4등과 5등의 점수 차. 이보다 좁으면 덜 읽은 걸로 보고 다시 찍음
+MIN_MARGIN = 0.06
+
+
+def match_score(img, subimg):
+    """'subimg'가 'img' 안에 얼마나 맞는지, 최고 점수"""
     subimg1 = cv2.cvtColor(np.array(subimg), cv2.COLOR_BGR2GRAY) # need gray image to do the matchTemplate
     res = cv2.matchTemplate(img, subimg1, cv2.TM_CCOEFF_NORMED)
-    threshold = 0.65 # error coef
-    loc = np.where(res >= threshold)
-    for pt in zip(*loc[::-1]):
-        return True
-    return False
+    return float(res.max())
+
+
+def read_targets(bbox, require_margin=True):
+    """맞는 지문 조각 4개의 좌표
+
+    고정 임계값으로 자르지 않고 8개 점수를 매겨 상위 4개를 고름
+    정답이 항상 4개라는 규칙을 쓰니 화면 밝기나 스케일에 안 흔들림
+    """
+    im = grab(bbox)
+    sub0_ = im.crop(tofind)
+    # need to resize the image because fingerprints parts is smaller than the
+    # image + need gray image to do the matchTemplate
+    sub0 = cv2.cvtColor(
+        np.array(sub0_.resize((round(sub0_.size[0] * 0.77), round(sub0_.size[1] * 0.77)))),
+        cv2.COLOR_BGR2GRAY)
+
+    scores = [match_score(sub0, im.crop(part[0])) for part in parts]
+    sub0_.close()
+    im.close()
+
+    order = sorted(range(len(parts)), key=lambda i: scores[i], reverse=True)
+    margin = scores[order[EXPECTED_MATCHES - 1]] - scores[order[EXPECTED_MATCHES]]
+
+    print('-  점수:', ' '.join(f'{parts[i][1]}={scores[i]:.3f}' for i in order))
+    print(f'-  4등/5등 격차: {margin:.3f}')
+
+    if require_margin and margin < MIN_MARGIN:
+        return None
+    return [parts[i][1] for i in order[:EXPECTED_MATCHES]]
+
 
 def find_shortest_solution(target_coordinates):
     Point = namedtuple('Point', ('x', 'y'))
@@ -82,25 +113,24 @@ def find_shortest_solution(target_coordinates):
 
     raise Exception('No solution found')
 
+
 def main(bbox):
     print('[*] Casino Fingerprint')
-    im = ImageGrab.grab(bbox)
-    im = im.resize((1920,1080))
-    sub0_ = im.crop(tofind)
-    sub0 = cv2.cvtColor(np.array(sub0_.resize((round(sub0_.size[0] * 0.77), round(sub0_.size[1] * 0.77)))), cv2.COLOR_BGR2GRAY) # need to resize the image because fingerprints parts is smaller than the image + need gray image to do the matchTemplate
 
-    # will store the location of the rights fingerprints
-    togo = [part[1] for part in parts if is_in(sub0, im.crop(part[0]))]
+    if DEBUG:
+        dump(bbox, 'casino_fingerprint')
 
-    # closing every images
-    sub0_.close()
-    im.close()
+    togo = retry(lambda: read_targets(bbox))
+    if togo is None:
+        # 격차가 계속 좁으면 확신은 없어도 제일 좋은 4개로 진행
+        print('[!] 점수 격차가 좁습니다. 상위 4개로 진행합니다.')
+        dump(bbox, 'casino_fingerprint_lowconf')
+        togo = read_targets(bbox, require_margin=False)
 
     moves = find_shortest_solution(togo)
 
     print('-', moves)
     for key in moves:
-        keyboard.press_and_release(key)
-        time.sleep(0.025)
+        tap(key)
     print('[*] END')
     print('=============================================')
