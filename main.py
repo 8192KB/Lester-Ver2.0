@@ -138,7 +138,7 @@ def resolve_bbox():
     return content_bbox(client_bbox(hwnd))
 
 
-def launch(module):
+def launch(target):
     """핫키 핸들러 생성. bbox는 누를 때마다 새로 계산"""
     def handler():
         if _busy.locked():
@@ -156,7 +156,8 @@ def launch(module):
         def run():
             with _busy:
                 try:
-                    module.main(bbox)
+                    runner = getattr(target, 'main', target)
+                    runner(bbox)
                 except FocusLost as e:
                     print(f'[!] {e}')
                     print('=============================================')
@@ -212,14 +213,15 @@ def main():
     if h % 8 or w % 8:
         print('[!] 크기가 어중간합니다. 모니터 배율이 100%인지 확인하세요.')
     print('')
-    print('[*] Press F4 for Exit')
-    print('[*] Press F5 for Fingerprint Scanner')
-    print('[*] Press F6 for Keypad Cracker')
-    print('[*] Press F7 for Retro Fingerprint Scanner')
-    print('[*] Press F8 for Voltage Hack')
-    print('[*] Press F9 for Host Number Matcher')
-    print('[*] Press F10 for BruteForce Matcher')
-    print('[*] Press F11 to dump what the tool sees (debug/)')
+    print('[*] F4  : 프로그램 종료')
+    print('[*] F5  : 지문 스캐너 (다이아몬드 카지노 습격)')
+    print('[*] F6  : 금고 키패드 크래커 (다이아몬드 카지노 습격)')
+    print('[*] F7  : 금고 키패드 크래커 2 (코르츠 센터 습격용)')
+    print('[*] F8  : 지문 복제기 (카요 페리코 습격)')
+    print('[*] F9  : 볼트랩 전압 해킹 (카요 페리코 습격)')
+    print('[*] F10 : HackConnect 숫자/IP 찾기 (여러 임무 공용)')
+    print('[*] F11 : BruteForce 비밀번호 맞추기 (여러 임무 공용)')
+    print('[*] F12 : 인식 화면 저장 (문제 진단용, debug/ 폴더)')
     print('')
     print('[!] 전체화면(Fullscreen) 대신 테두리 없는 창 모드를 쓰세요.')
     print('[!] 화면 캡처가 검게 나오면 이 프로그램을 관리자 권한으로 실행하세요.')
@@ -229,11 +231,12 @@ def main():
             '<F4>': shutdown,
             '<F5>': launch(casinofingerprint),
             '<F6>': launch(casinokeypad),
-            '<F7>': launch(cayofingerprint),
-            '<F8>': launch(cayovoltage),
-            '<F9>': launch(hostnumber),
-            '<F10>': launch(bruteforce),
-            '<F11>': debug_dump}) as h:
+            '<F7>': launch(casinokeypad.main_kortz),
+            '<F8>': launch(cayofingerprint),
+            '<F9>': launch(cayovoltage),
+            '<F10>': launch(hostnumber),
+            '<F11>': launch(bruteforce),
+            '<F12>': debug_dump}) as h:
         h.join()
 
 
