@@ -197,8 +197,11 @@ def calculate(numbers, bbox, begin=1):
     print('[*] END')
 
 
-def main(bbox):
-    print('[*] Casino Keypad Cracker')
+def solve(bbox, force_first_row=False):
+    if force_first_row:
+        print('[*] 금고 키패드 크래커 2 (코르츠 센터 습격용)')
+    else:
+        print('[*] 금고 키패드 크래커 (다이아몬드 카지노 습격)')
 
     if DEBUG:
         dump(bbox, 'casino_keypad')
@@ -215,8 +218,12 @@ def main(bbox):
     wait_for_input_phase(bbox)
     time.sleep(PHASE_SETTLE)
 
-    # 이전 판이 끝난 행에서 이어 시작하는 경우가 있어 커서를 직접 읽음
-    begin, how = start_row(bbox)
+    # 코르츠 센터 습격은 2회차도 항상 1행에서 시작한다.
+    # 카지노 습격은 화면의 커서 또는 직전 판의 마지막 행을 이어 쓴다.
+    if force_first_row:
+        begin, how = 1, '코르츠 센터: 매회 1행에서 시작'
+    else:
+        begin, how = start_row(bbox)
     print(f'- 시작 행: {begin} ({how})')
 
     for _ in range(HOME_PRESSES):
@@ -224,3 +231,11 @@ def main(bbox):
 
     calculate(numbers, bbox, begin)
     print('=============================================')
+
+
+def main(bbox):
+    solve(bbox)
+
+
+def main_kortz(bbox):
+    solve(bbox, force_first_row=True)
